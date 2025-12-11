@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgis/postgis:15-3.3
+    container_name: bursa_db_prod
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: bursa_redis_prod
+    volumes:
+      - redis_data_prod:/data
+    restart: always
+
+  api:
+    build: .
+    container_name: bursa_api_prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      DATABASE_SYNC_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: "false"
+      ENVIRONMENT: production
+      AI_API_KEY: ${AI_API_KEY}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      - db
+      - redis
+    restart: always
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+
+  nginx:
+    image: nginx:alpine
+    container_name: bursa_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./uploads:/app/uploads:ro
+    depends_on:
+      - api
+    restart: always
+
+volumes:
+  postgres_data_prod:
+  redis_data_prod:
+
