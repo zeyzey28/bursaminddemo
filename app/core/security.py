@@ -7,6 +7,8 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.config import settings
 
@@ -33,6 +35,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
+        # Token süresi: 15 dakika (güvenlik için kısa tutuldu)
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
     to_encode.update({"exp": expire})
@@ -50,7 +53,18 @@ def decode_token(token: str) -> Optional[dict]:
 
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    """Mevcut kullanıcıyı al"""
+    """
+    Mevcut kullanıcıyı al ve veritabanından doğrula
+    
+    Her istekte kullanıcının:
+    - Hala var olduğunu
+    - Aktif olduğunu
+    kontrol eder. Böylece silinen/deaktif edilen kullanıcılar
+    token geçerli olsa bile erişemez.
+    """
+    from app.core.database import AsyncSessionLocal
+    from app.models.user import User
+    
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Geçersiz kimlik bilgileri",
@@ -66,6 +80,28 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     user_id: str = payload.get("sub")
     if user_id is None:
         raise credentials_exception
+    
+    # Veritabanından kullanıcıyı kontrol et (Double Check)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(User).where(User.id == int(user_id))
+        )
+        user = result.scalar_one_or_none()
+        
+        # Kullanıcı silinmiş mi?
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Kullanıcı bulunamadı. Hesabınız silinmiş olabilir.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Kullanıcı deaktif edilmiş mi?
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Hesabınız devre dışı bırakılmış. Yönetici ile iletişime geçin.",
+            )
     
     return {"user_id": user_id, "role": payload.get("role", "citizen")}
 
