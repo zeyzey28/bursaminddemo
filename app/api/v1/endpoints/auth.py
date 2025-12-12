@@ -10,7 +10,7 @@ Akış:
 """
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, Field
@@ -88,6 +88,60 @@ async def citizen_register(
     )
 
 
+# Form Data ile kayıt (alternatif)
+@router.post("/citizen/register/form", response_model=Token, status_code=status.HTTP_201_CREATED)
+async def citizen_register_form(
+    username: str = Form(..., min_length=3, max_length=50),
+    password: str = Form(..., min_length=6),
+    full_name: Optional[str] = Form(None),
+    phone: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Vatandaş kaydı - Form Data ile (alternatif)
+    
+    Content-Type: application/x-www-form-urlencoded
+    """
+    # Kullanıcı adı kontrolü
+    result = await db.execute(
+        select(User).where(User.username == username)
+    )
+    existing_user = result.scalar_one_or_none()
+    
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bu kullanıcı adı zaten kullanılıyor"
+        )
+    
+    # Yeni vatandaş oluştur
+    new_user = User(
+        username=username,
+        hashed_password=get_password_hash(password),
+        full_name=full_name,
+        phone=phone,
+        email=email,
+        role=UserRole.CITIZEN,
+        is_active=True,
+        is_verified=True
+    )
+    
+    db.add(new_user)
+    await db.flush()
+    await db.refresh(new_user)
+    
+    # Token oluştur
+    access_token = create_access_token(
+        data={"sub": str(new_user.id), "role": new_user.role.value}
+    )
+    
+    return Token(
+        access_token=access_token,
+        user=UserResponse.model_validate(new_user)
+    )
+
+
 @router.post("/citizen/login", response_model=Token)
 async def citizen_login(
     credentials: UserLogin,
@@ -107,6 +161,60 @@ async def citizen_login(
     
     # Kullanıcı yok veya şifre yanlış
     if not user or not verify_password(credentials.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Geçersiz kullanıcı adı veya şifre"
+        )
+    
+    # Vatandaş mı kontrol et
+    if user.role != UserRole.CITIZEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu giriş sadece vatandaşlar içindir. Personel girişini kullanın."
+        )
+    
+    # Hesap aktif mi
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hesabınız devre dışı bırakılmış"
+        )
+    
+    # Son giriş zamanını güncelle
+    user.last_login = datetime.utcnow()
+    await db.flush()
+    
+    # Token oluştur
+    access_token = create_access_token(
+        data={"sub": str(user.id), "role": user.role.value}
+    )
+    
+    return Token(
+        access_token=access_token,
+        user=UserResponse.model_validate(user)
+    )
+
+
+# Form Data ile giriş (alternatif)
+@router.post("/citizen/login/form", response_model=Token)
+async def citizen_login_form(
+    username: str = Form(...),
+    password: str = Form(...),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Vatandaş girişi - Form Data ile (alternatif)
+    
+    Content-Type: application/x-www-form-urlencoded
+    """
+    # Kullanıcıyı bul
+    result = await db.execute(
+        select(User).where(User.username == username)
+    )
+    user = result.scalar_one_or_none()
+    
+    # Kullanıcı yok veya şifre yanlış
+    if not user or not verify_password(password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Geçersiz kullanıcı adı veya şifre"
