@@ -14,7 +14,8 @@ from app.api.v1.endpoints import (
     air_quality,
     shadow_routes,
     municipality,
-    geojson_data
+    geojson_data,
+    translations
 )
 
 api_router = APIRouter()
@@ -94,5 +95,11 @@ api_router.include_router(
     geojson_data.router,
     prefix="/geojson",
     tags=["GeoJSON Verileri"]
+)
+
+# Çeviri servisi (Türkçe, İngilizce, Arapça)
+api_router.include_router(
+    translations.router,
+    tags=["Çeviri"]
 )
 
