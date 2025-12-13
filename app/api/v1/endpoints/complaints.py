@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
@@ -17,6 +18,7 @@ from app.models.complaint import Complaint, ComplaintImage, ComplaintStatus, Com
 from app.schemas.complaint import (
     ComplaintCreate, ComplaintResponse, ComplaintListResponse
 )
+from app.services.storage_service import storage_service
 
 router = APIRouter()
 
@@ -61,31 +63,51 @@ async def create_complaint(
     db.add(complaint)
     await db.flush()
     
-    # Fotoğrafları kaydet
+    # Fotoğrafları Supabase Storage'a kaydet
     if images:
-        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-        
         for image in images:
             if image.filename:
-                # Dosya adı oluştur
-                ext = os.path.splitext(image.filename)[1]
-                file_name = f"{uuid.uuid4()}{ext}"
-                file_path = os.path.join(settings.UPLOAD_DIR, file_name)
-                
-                # Dosyayı kaydet
-                content = await image.read()
-                with open(file_path, "wb") as f:
-                    f.write(content)
-                
-                # Veritabanına ekle
-                complaint_image = ComplaintImage(
-                    complaint_id=complaint.id,
-                    file_path=file_path,
-                    file_name=image.filename,
-                    file_size=len(content),
-                    mime_type=image.content_type
-                )
-                db.add(complaint_image)
+                try:
+                    # Supabase Storage'a yükle
+                    file_path, public_url = await storage_service.upload_image(
+                        file=image,
+                        folder=f"complaints/{complaint.id}"
+                    )
+                    
+                    # Dosya boyutunu al
+                    await image.seek(0)
+                    content = await image.read()
+                    file_size = len(content)
+                    
+                    # Veritabanına ekle
+                    complaint_image = ComplaintImage(
+                        complaint_id=complaint.id,
+                        file_path=file_path,  # Supabase path
+                        file_name=image.filename,
+                        file_size=file_size,
+                        mime_type=image.content_type
+                    )
+                    db.add(complaint_image)
+                except Exception as e:
+                    # Storage hatası durumunda yerel kaydet (fallback)
+                    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+                    ext = os.path.splitext(image.filename)[1]
+                    file_name = f"{uuid.uuid4()}{ext}"
+                    local_path = os.path.join(settings.UPLOAD_DIR, file_name)
+                    
+                    await image.seek(0)
+                    content = await image.read()
+                    with open(local_path, "wb") as f:
+                        f.write(content)
+                    
+                    complaint_image = ComplaintImage(
+                        complaint_id=complaint.id,
+                        file_path=local_path,
+                        file_name=image.filename,
+                        file_size=len(content),
+                        mime_type=image.content_type
+                    )
+                    db.add(complaint_image)
     
     await db.flush()
     await db.refresh(complaint)
@@ -183,6 +205,39 @@ async def get_complaint(
         )
     
     return ComplaintResponse.model_validate(complaint)
+
+
+@router.get("/image/{image_id}")
+async def get_complaint_image(
+    image_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Şikayet fotoğrafını getir (redirect to Supabase URL)
+    """
+    result = await db.execute(
+        select(ComplaintImage).where(ComplaintImage.id == image_id)
+    )
+    image = result.scalar_one_or_none()
+    
+    if not image:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Fotoğraf bulunamadı"
+        )
+    
+    # Supabase Storage URL'i oluştur
+    if image.file_path.startswith("complaints/"):
+        # Supabase'de kayıtlı
+        public_url = storage_service.get_public_url(image.file_path)
+        return RedirectResponse(url=public_url)
+    else:
+        # Yerel dosya (fallback)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Fotoğraf yerel sunucuda. Supabase Storage kullanın."
+        )
 
 
 @router.get("/categories/list")

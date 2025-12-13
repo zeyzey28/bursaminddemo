@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE: int = 10485760  # 10MB
     
+    # Supabase Storage
+    SUPABASE_URL: str = ""
+    SUPABASE_KEY: str = ""
+    SUPABASE_BUCKET: str = "complaints"
+    
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
     
