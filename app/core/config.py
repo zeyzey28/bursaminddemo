@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     
     # File Upload
     UPLOAD_DIR: str = "./uploads"
-    MAX_FILE_SIZE: int = 10485760  # 10MB
+    MAX_FILE_SIZE: int = 25165824  # 24MB
     
     # Supabase Storage
     SUPABASE_URL: str = ""
