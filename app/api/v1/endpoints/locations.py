@@ -144,6 +144,129 @@ async def list_pharmacies(
     return response_list
 
 
+@router.get("/pharmacies/on-duty/nearest")
+async def find_nearest_on_duty_pharmacy(
+    latitude: float = Query(..., description="Kullanıcı enlemi"),
+    longitude: float = Query(..., description="Kullanıcı boylamı"),
+    profile: str = Query("driving", description="Ulaşım türü: driving, walking"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    🚨 NÖBETÇİ ECZANE BUL - En yakın nöbetçi eczaneyi bul ve yol tarifi al
+    
+    Bu endpoint "Nöbetçi Eczane Bul" butonuna basıldığında çağrılır.
+    Kullanıcının konumundan en yakın nöbetçi eczaneyi bulur ve
+    gerçek yol rotasını hesaplar.
+    """
+    from app.services.osrm_service import osrm_service, RoutePoint
+    
+    # Nöbetçi eczaneleri getir
+    result = await db.execute(
+        select(Pharmacy).where(Pharmacy.is_on_duty == True)
+    )
+    on_duty_pharmacies = result.scalars().all()
+    
+    if not on_duty_pharmacies:
+        return {
+            "found": False,
+            "message": "Şu anda nöbetçi eczane bulunamadı",
+            "pharmacy": None,
+            "route": None
+        }
+    
+    # Kullanıcı konumu
+    user_location = RoutePoint(
+        latitude=latitude,
+        longitude=longitude,
+        name="Konumunuz"
+    )
+    
+    # En yakın nöbetçi eczaneyi bul (gerçek yol mesafesi ile)
+    best_pharmacy = None
+    best_route = None
+    best_distance = float('inf')
+    
+    for pharmacy in on_duty_pharmacies:
+        pharmacy_point = RoutePoint(
+            latitude=pharmacy.latitude,
+            longitude=pharmacy.longitude,
+            name=pharmacy.name
+        )
+        
+        # OSRM ile gerçek rota hesapla
+        route = await osrm_service.get_route(user_location, pharmacy_point, profile=profile)
+        
+        if route and route.distance_km < best_distance:
+            best_distance = route.distance_km
+            best_pharmacy = pharmacy
+            best_route = route
+    
+    if not best_pharmacy:
+        # Fallback: Kuş uçuşu en yakın
+        best_pharmacy = min(
+            on_duty_pharmacies,
+            key=lambda p: geodesic(
+                (latitude, longitude),
+                (p.latitude, p.longitude)
+            ).kilometers
+        )
+        straight_distance = geodesic(
+            (latitude, longitude),
+            (best_pharmacy.latitude, best_pharmacy.longitude)
+        ).kilometers
+        
+        return {
+            "found": True,
+            "fallback": True,
+            "message": "Rota hesaplanamadı, kuş uçuşu mesafe gösteriliyor",
+            "pharmacy": {
+                "id": best_pharmacy.id,
+                "name": best_pharmacy.name,
+                "address": best_pharmacy.address,
+                "phone": best_pharmacy.phone,
+                "latitude": best_pharmacy.latitude,
+                "longitude": best_pharmacy.longitude,
+                "is_on_duty": True,
+                "icon": "💊"
+            },
+            "distance_km": round(straight_distance, 2),
+            "route": None
+        }
+    
+    return {
+        "found": True,
+        "fallback": False,
+        "message": f"En yakın nöbetçi eczane: {best_pharmacy.name}",
+        "pharmacy": {
+            "id": best_pharmacy.id,
+            "name": best_pharmacy.name,
+            "address": best_pharmacy.address,
+            "phone": best_pharmacy.phone,
+            "latitude": best_pharmacy.latitude,
+            "longitude": best_pharmacy.longitude,
+            "is_on_duty": True,
+            "duty_date": best_pharmacy.duty_date.isoformat() if best_pharmacy.duty_date else None,
+            "icon": "💊"
+        },
+        "distance_km": best_route.distance_km,
+        "duration_min": best_route.duration_min,
+        "profile": profile,
+        "route": {
+            "geometry": best_route.geometry,
+            "steps": best_route.steps
+        },
+        "navigation_instructions": [
+            {
+                "step": i + 1,
+                "instruction": step.get("instruction") or step.get("name", "Devam et"),
+                "distance_m": step.get("distance_m", 0),
+                "road_name": step.get("name", "")
+            }
+            for i, step in enumerate(best_route.steps[:10])  # İlk 10 adım
+        ]
+    }
+
+
 @router.get("/pharmacies/geojson", response_model=GeoJSONResponse)
 async def get_pharmacies_geojson(
     db: AsyncSession = Depends(get_db)
