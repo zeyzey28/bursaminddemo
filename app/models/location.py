@@ -1,11 +1,79 @@
 """
-Konum Modelleri - Hastane, Eczane, Yol, Trafik
+Konum Modelleri - Hastane, Eczane, Kütüphane, Park, Yol, Trafik
 """
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Float, Text, Boolean, Enum as SQLEnum
 import enum
 
 from app.core.database import Base
+
+
+class Library(Base):
+    """Kütüphane tablosu"""
+    __tablename__ = "libraries"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    osm_id = Column(String(50), unique=True, index=True, nullable=True)
+    
+    name = Column(String(255), nullable=False)
+    
+    # Konum
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    
+    # Detaylar
+    address = Column(String(500), nullable=True)
+    phone = Column(String(50), nullable=True)
+    website = Column(String(255), nullable=True)
+    
+    # Özellikler
+    library_type = Column(String(100), nullable=True)  # Halk, Üniversite, Çocuk vb.
+    opening_hours = Column(String(255), nullable=True)  # Çalışma saatleri
+    has_wifi = Column(Boolean, default=False)
+    has_study_room = Column(Boolean, default=False)
+    has_children_section = Column(Boolean, default=False)
+    
+    # Meta
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<Library {self.name}>"
+
+
+class Park(Base):
+    """Park / Yeşil Alan tablosu"""
+    __tablename__ = "parks"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    osm_id = Column(String(50), unique=True, index=True, nullable=True)
+    
+    name = Column(String(255), nullable=False)
+    
+    # Konum
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    
+    # Detaylar
+    address = Column(String(500), nullable=True)
+    area_sqm = Column(Float, nullable=True)  # Alan (m²)
+    
+    # Özellikler
+    park_type = Column(String(100), nullable=True)  # Park, Millet Bahçesi, Mesire vb.
+    has_playground = Column(Boolean, default=False)  # Çocuk oyun alanı
+    has_sports_area = Column(Boolean, default=False)  # Spor alanı
+    has_walking_path = Column(Boolean, default=False)  # Yürüyüş yolu
+    has_parking = Column(Boolean, default=False)  # Otopark
+    has_cafe = Column(Boolean, default=False)  # Kafe/Büfe
+    
+    # Meta
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<Park {self.name}>"
 
 
 class Hospital(Base):
