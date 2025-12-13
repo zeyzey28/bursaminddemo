@@ -583,3 +583,91 @@ async def change_password(
     await db.flush()
     
     return {"message": "Şifreniz başarıyla değiştirildi"}
+
+
+# ============================================
+# ŞİFRE SIFIRLAMA (Şifremi Unuttum)
+# ============================================
+
+class ForgotPasswordRequest(BaseModel):
+    """Şifremi unuttum - kullanıcı adı ile"""
+    username: str = Field(..., min_length=3)
+
+
+class ResetPasswordRequest(BaseModel):
+    """Şifre sıfırlama"""
+    username: str = Field(..., min_length=3)
+    new_password: str = Field(..., min_length=6)
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    data: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Şifremi unuttum - Kullanıcı adı kontrolü
+    
+    Kullanıcı adının sistemde kayıtlı olup olmadığını kontrol eder.
+    Kayıtlıysa şifre sıfırlama işlemine devam edilebilir.
+    """
+    result = await db.execute(
+        select(User).where(User.username == data.username)
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bu kullanıcı adı sistemde kayıtlı değil"
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu hesap devre dışı bırakılmış"
+        )
+    
+    return {
+        "found": True,
+        "username": user.username,
+        "message": "Kullanıcı bulundu. Yeni şifrenizi belirleyebilirsiniz."
+    }
+
+
+@router.post("/reset-password")
+async def reset_password(
+    data: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Şifre sıfırlama - Kullanıcı adı ile yeni şifre belirleme
+    
+    Önce /forgot-password ile kullanıcı adı doğrulanmalı,
+    sonra bu endpoint ile yeni şifre belirlenir.
+    """
+    result = await db.execute(
+        select(User).where(User.username == data.username)
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Kullanıcı bulunamadı"
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu hesap devre dışı bırakılmış"
+        )
+    
+    # Şifreyi güncelle
+    user.hashed_password = get_password_hash(data.new_password)
+    await db.flush()
+    
+    return {
+        "success": True,
+        "message": "Şifreniz başarıyla sıfırlandı. Yeni şifrenizle giriş yapabilirsiniz."
+    }
