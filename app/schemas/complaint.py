@@ -33,9 +33,12 @@ class ComplaintImageResponse(BaseModel):
     id: int
     file_path: str
     file_name: str
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
     ai_analysis: Optional[str] = None
     ai_tags: Optional[str] = None
     created_at: datetime
+    uploaded_at: Optional[datetime] = None  # Sisteme yüklenme zamanı
     
     class Config:
         from_attributes = True
@@ -69,14 +72,27 @@ class ComplaintResponse(ComplaintBase):
     ai_verified: bool
     ai_verification_score: Optional[float] = None
     ai_category_suggestion: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-    resolved_at: Optional[datetime] = None
+    
+    # Zaman damgaları
+    created_at: datetime           # Şikayet oluşturulma zamanı
+    updated_at: datetime           # Son güncelleme zamanı
+    resolved_at: Optional[datetime] = None  # Çözülme zamanı
+    
+    # İlişkiler
     images: List[ComplaintImageResponse] = []
     feedbacks: List[ComplaintFeedbackResponse] = []
     
+    # Hesaplanan alanlar
+    has_images: bool = False       # Fotoğraf var mı?
+    image_count: int = 0           # Fotoğraf sayısı
+    
     class Config:
         from_attributes = True
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        self.has_images = len(self.images) > 0
+        self.image_count = len(self.images)
 
 
 class ComplaintListResponse(BaseModel):

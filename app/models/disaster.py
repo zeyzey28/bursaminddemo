@@ -131,3 +131,43 @@ class BlockedRoad(Base):
     def __repr__(self):
         return f"<BlockedRoad {self.road_name}>"
 
+
+class AssemblyPoint(Base):
+    """Afet Toplanma Alanları"""
+    __tablename__ = "assembly_points"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Temel bilgiler
+    name = Column(String(255), nullable=False)
+    osm_id = Column(String(50), nullable=True, unique=True)
+    
+    # Konum
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    
+    # Adres bilgileri
+    address = Column(String(500), nullable=True)
+    district = Column(String(100), nullable=True)  # İlçe
+    neighborhood = Column(String(100), nullable=True)  # Mahalle
+    
+    # Kapasite ve özellikler
+    capacity = Column(Integer, nullable=True)  # Kaç kişi alabilir
+    area_sqm = Column(Float, nullable=True)  # Alan (m²)
+    
+    # Erişilebilirlik
+    is_accessible = Column(Boolean, default=True)  # Engelli erişimi
+    has_lighting = Column(Boolean, default=True)  # Aydınlatma
+    has_water = Column(Boolean, default=False)  # Su kaynağı
+    has_toilet = Column(Boolean, default=False)  # Tuvalet
+    
+    # Durum
+    is_active = Column(Boolean, default=True)
+    
+    # Meta
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<AssemblyPoint {self.name}>"
+

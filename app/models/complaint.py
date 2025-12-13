@@ -101,7 +101,9 @@ class ComplaintImage(Base):
     ai_analysis = Column(Text, nullable=True)  # JSON formatında AI analizi
     ai_tags = Column(String(500), nullable=True)  # Virgülle ayrılmış etiketler
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # Zaman damgaları
+    created_at = Column(DateTime, default=datetime.utcnow)  # Kayıt oluşturma zamanı
+    uploaded_at = Column(DateTime, default=datetime.utcnow)  # Sisteme yüklenme zamanı
     
     # İlişki
     complaint = relationship("Complaint", back_populates="images")

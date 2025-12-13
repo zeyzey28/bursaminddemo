@@ -13,7 +13,8 @@ from app.api.v1.endpoints import (
     disaster,
     air_quality,
     shadow_routes,
-    municipality
+    municipality,
+    geojson_data
 )
 
 api_router = APIRouter()
@@ -86,5 +87,12 @@ api_router.include_router(
     municipality.router,
     prefix="/municipality",
     tags=["Belediye Paneli"]
+)
+
+# GeoJSON Verileri (Naim Süleymanoğlu Bulvarı)
+api_router.include_router(
+    geojson_data.router,
+    prefix="/geojson",
+    tags=["GeoJSON Verileri"]
 )
 
