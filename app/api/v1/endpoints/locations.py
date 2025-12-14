@@ -150,6 +150,7 @@ async def find_nearest_on_duty_pharmacy(
     longitude: float = Query(..., description="Kullanıcı boylamı"),
     profile: str = Query("driving", description="Ulaşım türü: driving, walking"),
     night_mode: bool = Query(False, description="Gece modu: Aydınlık yolları tercih et"),
+    shadow_mode: bool = Query(False, description="Yaz modu: Gölgeli yolları tercih et"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -160,9 +161,11 @@ async def find_nearest_on_duty_pharmacy(
     gerçek yol rotasını hesaplar.
     
     Gece modu (night_mode=true) aktifse, aydınlık yolları tercih eder.
+    Yaz modu (shadow_mode=true) aktifse, gölgeli yolları tercih eder.
     """
     from app.services.osrm_service import osrm_service, RoutePoint
     from app.services.night_mode_routing import NightModeRoutingService
+    from app.services.shadow_mode_routing import ShadowModeRoutingService
     
     # Nöbetçi eczaneleri getir
     result = await db.execute(
@@ -185,7 +188,58 @@ async def find_nearest_on_duty_pharmacy(
         name="Konumunuz"
     )
     
-    # Gece modu aktifse
+    # Yaz modu aktifse (gölgeli yollar)
+    if shadow_mode:
+        shadow_service = ShadowModeRoutingService(db)
+        
+        best_pharmacy = None
+        best_route_result = None
+        best_shade_score = -1
+        
+        for pharmacy in on_duty_pharmacies:
+            pharmacy_point = RoutePoint(
+                latitude=pharmacy.latitude,
+                longitude=pharmacy.longitude,
+                name=pharmacy.name
+            )
+            
+            # Yaz modu rotasını hesapla
+            shadow_route_result = await shadow_service.get_shadow_mode_route(
+                user_location, pharmacy_point, profile=profile
+            )
+            
+            if shadow_route_result and shadow_route_result["route"]:
+                shade_score = shadow_route_result["shade_analysis"]["avg_shade_score"]
+                if shade_score > best_shade_score:
+                    best_shade_score = shade_score
+                    best_pharmacy = pharmacy
+                    best_route_result = shadow_route_result
+        
+        if best_pharmacy and best_route_result:
+            return {
+                "found": True,
+                "fallback": False,
+                "shadow_mode": True,
+                "message": f"En yakın nöbetçi eczane (Gölgeli Yol): {best_pharmacy.name}",
+                "pharmacy": {
+                    "id": best_pharmacy.id,
+                    "name": best_pharmacy.name,
+                    "address": best_pharmacy.address,
+                    "phone": best_pharmacy.phone,
+                    "latitude": best_pharmacy.latitude,
+                    "longitude": best_pharmacy.longitude,
+                    "is_on_duty": True,
+                    "icon": "💊"
+                },
+                "distance_km": best_route_result["route"].distance_km,
+                "duration_min": best_route_result["route"].duration_min,
+                "geometry": best_route_result["route"].geometry,
+                "steps": best_route_result["route"].steps,
+                "profile": profile,
+                "shade_analysis": best_route_result["shade_analysis"]
+            }
+    
+    # Gece modu aktifse (aydınlık yollar)
     if night_mode:
         night_service = NightModeRoutingService(db)
         
@@ -884,6 +938,7 @@ async def navigate_to_location(
     longitude: float = Query(..., description="Kullanıcı boylamı"),
     profile: str = Query("driving", description="driving, walking, cycling"),
     night_mode: bool = Query(False, description="Gece modu: Aydınlık yolları tercih et"),
+    shadow_mode: bool = Query(False, description="Yaz modu: Gölgeli yolları tercih et"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -891,8 +946,10 @@ async def navigate_to_location(
     
     Haritada bir lokasyona tıklandığında rota hesaplar.
     Gece modu aktifse, aydınlık yolları tercih eder.
+    Yaz modu aktifse, gölgeli yolları tercih eder.
     """
     from app.services.night_mode_routing import NightModeRoutingService
+    from app.services.shadow_mode_routing import ShadowModeRoutingService
     
     # Lokasyonu bul
     if location_type == "hospital":
@@ -927,7 +984,32 @@ async def navigate_to_location(
     start = RoutePoint(latitude=latitude, longitude=longitude, name="Konumunuz")
     end = RoutePoint(latitude=location.latitude, longitude=location.longitude, name=location.name)
     
-    # Gece modu aktifse
+    # Yaz modu aktifse (gölgeli yollar)
+    if shadow_mode:
+        shadow_service = ShadowModeRoutingService(db)
+        result = await shadow_service.get_shadow_mode_route(start, end, profile=profile)
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Yaz modu rotası hesaplanamadı"
+            )
+        
+        return {
+            "location": {
+                "id": location.id,
+                "name": location.name,
+                "type": location_type,
+                "latitude": location.latitude,
+                "longitude": location.longitude,
+                "icon": icon
+            },
+            "shadow_mode": True,
+            "route": result["route"],
+            "shade_analysis": result["shade_analysis"]
+        }
+    
+    # Gece modu aktifse (aydınlık yollar)
     if night_mode:
         night_service = NightModeRoutingService(db)
         result = await night_service.get_night_mode_route(start, end, profile=profile)

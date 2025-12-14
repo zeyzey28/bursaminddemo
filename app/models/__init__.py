@@ -7,6 +7,7 @@ from app.models.air_quality import AirQualityReading
 from app.models.shadow import ShadowRoute
 from app.models.traffic_risk import SegmentRisk, TrafficForecast, WhatIfScenario
 from app.models.segment_lighting import SegmentLighting
+from app.models.road_shadow import RoadShadow
 
 __all__ = [
     "User",
@@ -29,6 +30,7 @@ __all__ = [
     "SegmentRisk",
     "TrafficForecast",
     "WhatIfScenario",
-    "SegmentLighting"
+    "SegmentLighting",
+    "RoadShadow"
 ]
 
