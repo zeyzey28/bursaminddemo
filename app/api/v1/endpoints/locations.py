@@ -149,6 +149,7 @@ async def find_nearest_on_duty_pharmacy(
     latitude: float = Query(..., description="Kullanıcı enlemi"),
     longitude: float = Query(..., description="Kullanıcı boylamı"),
     profile: str = Query("driving", description="Ulaşım türü: driving, walking"),
+    night_mode: bool = Query(False, description="Gece modu: Aydınlık yolları tercih et"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -157,8 +158,11 @@ async def find_nearest_on_duty_pharmacy(
     Bu endpoint "Nöbetçi Eczane Bul" butonuna basıldığında çağrılır.
     Kullanıcının konumundan en yakın nöbetçi eczaneyi bulur ve
     gerçek yol rotasını hesaplar.
+    
+    Gece modu (night_mode=true) aktifse, aydınlık yolları tercih eder.
     """
     from app.services.osrm_service import osrm_service, RoutePoint
+    from app.services.night_mode_routing import NightModeRoutingService
     
     # Nöbetçi eczaneleri getir
     result = await db.execute(
@@ -181,7 +185,62 @@ async def find_nearest_on_duty_pharmacy(
         name="Konumunuz"
     )
     
-    # En yakın nöbetçi eczaneyi bul (gerçek yol mesafesi ile)
+    # Gece modu aktifse
+    if night_mode:
+        night_service = NightModeRoutingService(db)
+        
+        # Tüm nöbetçi eczaneleri RoutePoint'e çevir
+        pharmacy_points = [
+            RoutePoint(
+                latitude=p.latitude,
+                longitude=p.longitude,
+                name=p.name
+            )
+            for p in on_duty_pharmacies
+        ]
+        
+        # Gece modu ile en yakın eczaneyi bul
+        results = await night_service.get_nearest_with_night_route(
+            user_location, pharmacy_points, profile=profile, top_n=1
+        )
+        
+        if not results:
+            return {
+                "found": False,
+                "message": "Gece modu rotası hesaplanamadı",
+                "pharmacy": None,
+                "route": None
+            }
+        
+        best_result = results[0]
+        best_pharmacy = next(
+            p for p in on_duty_pharmacies
+            if p.latitude == best_result["destination"]["latitude"]
+            and p.longitude == best_result["destination"]["longitude"]
+        )
+        
+        return {
+            "found": True,
+            "fallback": False,
+            "night_mode": True,
+            "message": f"En yakın nöbetçi eczane (Aydınlık Yol): {best_pharmacy.name}",
+            "pharmacy": {
+                "id": best_pharmacy.id,
+                "name": best_pharmacy.name,
+                "address": best_pharmacy.address,
+                "phone": best_pharmacy.phone,
+                "latitude": best_pharmacy.latitude,
+                "longitude": best_pharmacy.longitude,
+                "is_on_duty": True,
+                "icon": "💊"
+            },
+            "distance_km": best_result["distance_km"],
+            "duration_min": best_result["duration_min"],
+            "route": best_result["route"],
+            "lighting_analysis": best_result["lighting_analysis"]
+        }
+    
+    # Normal mod (en kısa yol)
     best_pharmacy = None
     best_route = None
     best_distance = float('inf')
@@ -236,6 +295,7 @@ async def find_nearest_on_duty_pharmacy(
     return {
         "found": True,
         "fallback": False,
+        "night_mode": False,
         "message": f"En yakın nöbetçi eczane: {best_pharmacy.name}",
         "pharmacy": {
             "id": best_pharmacy.id,
@@ -661,6 +721,37 @@ async def search_locations(
 # OSRM ROTA HESAPLAMA ENDPOİNT'LERİ
 # ============================================
 
+@router.post("/route/night-mode")
+async def calculate_night_mode_route(
+    request: RouteRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    🌙 Gece Modu Routing - Aydınlık yolları tercih eden rota
+    
+    İki nokta arasında gece modu rotası hesaplar.
+    Karanlık yolları tercih etmek yerine aydınlık yolları tercih eder.
+    """
+    from app.services.osrm_service import RoutePoint
+    from app.services.night_mode_routing import NightModeRoutingService
+    
+    start = RoutePoint(latitude=request.start_latitude, longitude=request.start_longitude, name="Başlangıç")
+    end = RoutePoint(latitude=request.end_latitude, longitude=request.end_longitude, name="Bitiş")
+    
+    profile = request.profile or "walking"
+    
+    night_service = NightModeRoutingService(db)
+    result = await night_service.get_night_mode_route(start, end, profile=profile)
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Gece modu rotası hesaplanamadı"
+        )
+    
+    return result
+
+
 @router.post("/route")
 async def calculate_route(request: RouteRequest):
     """
@@ -792,13 +883,17 @@ async def navigate_to_location(
     latitude: float = Query(..., description="Kullanıcı enlemi"),
     longitude: float = Query(..., description="Kullanıcı boylamı"),
     profile: str = Query("driving", description="driving, walking, cycling"),
+    night_mode: bool = Query(False, description="Gece modu: Aydınlık yolları tercih et"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Belirli bir lokasyona navigasyon rotası
     
     Haritada bir lokasyona tıklandığında rota hesaplar.
+    Gece modu aktifse, aydınlık yolları tercih eder.
     """
+    from app.services.night_mode_routing import NightModeRoutingService
+    
     # Lokasyonu bul
     if location_type == "hospital":
         result = await db.execute(select(Hospital).where(Hospital.id == location_id))
@@ -828,10 +923,36 @@ async def navigate_to_location(
             detail="Lokasyon bulunamadı"
         )
     
-    # OSRM ile rota hesapla
+    # Başlangıç ve bitiş noktaları
     start = RoutePoint(latitude=latitude, longitude=longitude, name="Konumunuz")
     end = RoutePoint(latitude=location.latitude, longitude=location.longitude, name=location.name)
     
+    # Gece modu aktifse
+    if night_mode:
+        night_service = NightModeRoutingService(db)
+        result = await night_service.get_night_mode_route(start, end, profile=profile)
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Gece modu rotası hesaplanamadı"
+            )
+        
+        return {
+            "location": {
+                "id": location.id,
+                "name": location.name,
+                "type": location_type,
+                "latitude": location.latitude,
+                "longitude": location.longitude,
+                "icon": icon
+            },
+            "night_mode": True,
+            "route": result["route"],
+            "lighting_analysis": result["lighting_analysis"]
+        }
+    
+    # Normal mod (en kısa yol)
     route = await osrm_service.get_route(start, end, profile=profile)
     
     if not route:
@@ -840,6 +961,7 @@ async def navigate_to_location(
         return {
             "found": False,
             "fallback": True,
+            "night_mode": False,
             "destination": {
                 "id": location.id,
                 "name": location.name,
@@ -853,6 +975,7 @@ async def navigate_to_location(
     
     return {
         "found": True,
+        "night_mode": False,
         "destination": {
             "id": location.id,
             "name": location.name,

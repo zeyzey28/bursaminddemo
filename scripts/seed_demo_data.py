@@ -15,9 +15,8 @@ from app.core.security import get_password_hash
 from app.models.user import User, UserRole
 from app.models.complaint import Complaint, ComplaintStatus, ComplaintCategory, ComplaintPriority
 from app.models.location import TrafficPoint, TrafficLevel
-from app.models.trash import TrashBin, TrashBinType  # noqa: F401 (çöp modülü devre dışı)
+# Çöp ve afet modelleri kaldırıldı
 from app.models.air_quality import AirQualityReading, AirQualityLevel
-from app.models.disaster import DisasterMode, SafeRoute, BlockedRoad, DisasterType, DisasterSeverity  # noqa: F401 (afet modülü devre dışı)
 from app.models.shadow import ShadowRoute
 
 
@@ -44,6 +43,7 @@ async def create_users(session):
     
     users = [
         User(
+            username="admin",
             email="admin@bursa.bel.tr",
             hashed_password=get_password_hash("admin123"),
             full_name="Admin Kullanıcı",
@@ -51,6 +51,7 @@ async def create_users(session):
             is_verified=True
         ),
         User(
+            username="belediye",
             email="belediye@bursa.bel.tr",
             hashed_password=get_password_hash("belediye123"),
             full_name="Belediye Personeli",
@@ -58,6 +59,7 @@ async def create_users(session):
             is_verified=True
         ),
         User(
+            username="vatandas",
             email="vatandas@example.com",
             hashed_password=get_password_hash("vatandas123"),
             full_name="Örnek Vatandaş",
@@ -81,13 +83,48 @@ async def create_complaints(session, user):
     print("\n📝 Şikayetler oluşturuluyor...")
     
     complaint_data = [
-        ("Yol çukuru", "Bulvar üzerinde derin bir çukur var, araçlar için tehlikeli.", ComplaintCategory.ROAD_DAMAGE),
-        ("Sokak lambası arızalı", "3 gündür yanmıyor, gece karanlık oluyor.", ComplaintCategory.LIGHTING),
-        ("Çöp birikintisi", "Köşedeki çöp kutusu taşmış, koku yayılıyor.", ComplaintCategory.TRASH),
-        ("Trafik işareti eksik", "Kavşakta dur işareti yok.", ComplaintCategory.TRAFFIC),
+        # Yol Hasarı
+        ("Yol çukuru", "Bulvar üzerinde derin bir çukur var, araçlar için tehlikeli. Acil onarım gerekli!", ComplaintCategory.ROAD_DAMAGE),
+        ("Asfalt bozulması", "Yol yüzeyinde çatlaklar oluşmuş, yağmurda su birikiyor.", ComplaintCategory.ROAD_DAMAGE),
+        ("Kaldırım hasarı", "Kaldırım taşları kırılmış, yürüyüş için tehlikeli.", ComplaintCategory.ROAD_DAMAGE),
+        
+        # Aydınlatma
+        ("Sokak lambası arızalı", "3 gündür yanmıyor, gece karanlık oluyor. Güvenlik sorunu!", ComplaintCategory.LIGHTING),
+        ("Yetersiz aydınlatma", "Bu bölgede sokak lambaları çok az, gece yürümek zor.", ComplaintCategory.LIGHTING),
+        ("Lamba kırılmış", "Sokak lambası camı kırılmış, değiştirilmesi gerekiyor.", ComplaintCategory.LIGHTING),
+        
+        # Trafik
+        ("Trafik işareti eksik", "Kavşakta dur işareti yok, kazalar olabilir.", ComplaintCategory.TRAFFIC),
+        ("Trafik ışığı arızalı", "Trafik ışığı sürekli yanıp sönüyor, düzeltilmeli.", ComplaintCategory.TRAFFIC),
+        ("Yol işaretleri silinmiş", "Yol üzerindeki çizgiler silinmiş, trafik karışıyor.", ComplaintCategory.TRAFFIC),
+        
+        # Park
         ("Park sorunu", "Kaldırıma park eden araçlar yürüyüşü engelliyor.", ComplaintCategory.PARKING),
-        ("Ağaç bakımı gerekli", "Ağaç dalları elektrik tellerine değiyor.", ComplaintCategory.GREEN_AREA),
-        ("Su sızıntısı", "Ana borudan su sızıyor, yol ıslanmış.", ComplaintCategory.WATER),
+        ("Yasak park", "Yasak bölgeye park eden araçlar var, ceza kesilmeli.", ComplaintCategory.PARKING),
+        
+        # Yeşil Alan
+        ("Ağaç bakımı gerekli", "Ağaç dalları elektrik tellerine değiyor, kesilmesi lazım.", ComplaintCategory.GREEN_AREA),
+        ("Çim biçme gerekli", "Parktaki çimler çok uzamış, biçilmesi gerekiyor.", ComplaintCategory.GREEN_AREA),
+        ("Ağaç devrilme riski", "Eski ağaç devrilme riski taşıyor, kontrol edilmeli.", ComplaintCategory.GREEN_AREA),
+        
+        # Su/Kanalizasyon
+        ("Su sızıntısı", "Ana borudan su sızıyor, yol ıslanmış ve kaygan.", ComplaintCategory.WATER),
+        ("Kanalizasyon taşması", "Kanalizasyon taşmış, koku ve sağlık sorunu var.", ComplaintCategory.WATER),
+        ("Su kesintisi", "2 gündür su yok, acil müdahale gerekiyor.", ComplaintCategory.WATER),
+        
+        # Gürültü
+        ("Yüksek ses", "Gece yarısından sonra yüksek sesle müzik çalıyor, rahatsız ediyor.", ComplaintCategory.NOISE),
+        ("İnşaat gürültüsü", "İnşaat sabah 6'da başlıyor, çok gürültülü.", ComplaintCategory.NOISE),
+        
+        # Hava Kalitesi
+        ("Hava kirliliği", "Bu bölgede hava çok kirli, ölçüm yapılmalı.", ComplaintCategory.AIR_QUALITY),
+        
+        # Güvenlik
+        ("Güvenlik kamerası eksik", "Bu bölgede güvenlik kamerası yok, hırsızlık oluyor.", ComplaintCategory.SAFETY),
+        ("Kırık cam", "Bina camları kırılmış, güvenlik riski var.", ComplaintCategory.SAFETY),
+        
+        # Diğer
+        ("Genel sorun", "Bu bölgede genel bir sorun var, kontrol edilmeli.", ComplaintCategory.OTHER),
     ]
     
     complaints = []
@@ -106,7 +143,9 @@ async def create_complaints(session, user):
             longitude=lon,
             status=status,
             priority=priority,
-            urgency_score=random.uniform(0.3, 0.9),
+            urgency_score=random.uniform(0.3, 0.95),
+            ai_verified=random.choice([True, False]),
+            ai_verification_score=random.uniform(0.6, 0.98) if random.choice([True, False]) else None,
             created_at=datetime.utcnow() - timedelta(days=random.randint(0, 30))
         )
         
@@ -273,8 +312,8 @@ async def main():
             # Trafik
             await create_traffic_points(session)
             
-            # Çöp kutuları
-            await create_trash_bins(session)
+            # Çöp kutuları (devre dışı)
+            # await create_trash_bins(session)
             
             # Hava kalitesi
             await create_air_quality(session)

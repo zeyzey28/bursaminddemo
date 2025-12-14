@@ -6,6 +6,7 @@ from app.models.location import Hospital, Pharmacy, Road, TrafficPoint
 from app.models.air_quality import AirQualityReading
 from app.models.shadow import ShadowRoute
 from app.models.traffic_risk import SegmentRisk, TrafficForecast, WhatIfScenario
+from app.models.segment_lighting import SegmentLighting
 
 __all__ = [
     "User",
@@ -27,6 +28,7 @@ __all__ = [
     "ShadowRoute",
     "SegmentRisk",
     "TrafficForecast",
-    "WhatIfScenario"
+    "WhatIfScenario",
+    "SegmentLighting"
 ]
 

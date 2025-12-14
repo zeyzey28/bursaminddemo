@@ -514,6 +514,65 @@ Authorization: Bearer <access_token>
 
 ---
 
+### 🌙 Gece Modu Routing
+
+#### 1. Gece Modu Rota Hesapla
+
+**Endpoint:** `POST /api/v1/locations/route/night-mode`
+
+**Request Body:**
+```json
+{
+  "start_latitude": 40.1828,
+  "start_longitude": 29.0665,
+  "end_latitude": 40.1850,
+  "end_longitude": 29.0700,
+  "profile": "walking"
+}
+```
+
+**Response:**
+```json
+{
+  "route": {
+    "distance_km": 2.5,
+    "duration_min": 30.0,
+    "geometry": {...},
+    "steps": [...]
+  },
+  "lighting_analysis": {
+    "lighting_score": 0.25,
+    "dark_segment_count": 2,
+    "avg_lighting_score": 0.75,
+    "is_night_mode_optimized": true
+  },
+  "is_night_mode": true
+}
+```
+
+**JavaScript Örneği:**
+```javascript
+const getNightModeRoute = async (start, end) => {
+  const response = await fetch('http://localhost:8000/api/v1/locations/route/night-mode', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      start_latitude: start.lat,
+      start_longitude: start.lng,
+      end_latitude: end.lat,
+      end_longitude: end.lng,
+      profile: 'walking'
+    })
+  });
+  
+  return await response.json();
+};
+```
+
+---
+
 ### 🗺️ Konum Servisleri (Public - Auth Gerektirmez)
 
 #### 1. Yakındaki Eczaneler
@@ -554,7 +613,155 @@ const getNearbyPharmacies = async (lat, lng, radius = 5) => {
 
 ---
 
-#### 2. Yakındaki Hastaneler
+#### 2. Nöbetçi Eczane Bul (Gece Modu Desteği)
+
+**Endpoint:** `GET /api/v1/locations/pharmacies/on-duty/nearest`
+
+**Query Parameters:**
+- `latitude` (float, **zorunlu**): Kullanıcı enlemi
+- `longitude` (float, **zorunlu**): Kullanıcı boylamı
+- `profile` (string, default: "driving"): Ulaşım türü (driving, walking)
+- `night_mode` (bool, default: false): **Gece modu aktifse aydınlık yolları tercih eder**
+
+**Response (Normal Mod):**
+```json
+{
+  "found": true,
+  "night_mode": false,
+  "pharmacy": {
+    "id": 1,
+    "name": "Merkez Eczanesi",
+    "address": "...",
+    "phone": "+905551234567",
+    "latitude": 40.1830,
+    "longitude": 29.0670
+  },
+  "distance_km": 0.5,
+  "duration_min": 5.0,
+  "route": {...}
+}
+```
+
+**Response (Gece Modu):**
+```json
+{
+  "found": true,
+  "night_mode": true,
+  "pharmacy": {...},
+  "distance_km": 0.7,
+  "duration_min": 6.5,
+  "route": {...},
+  "lighting_analysis": {
+    "lighting_score": 0.25,
+    "dark_segment_count": 1,
+    "avg_lighting_score": 0.80,
+    "is_night_mode_optimized": true
+  }
+}
+```
+
+**JavaScript Örneği:**
+```javascript
+const findNearestPharmacy = async (lat, lng, nightMode = false) => {
+  const response = await fetch(
+    `http://localhost:8000/api/v1/locations/pharmacies/on-duty/nearest?latitude=${lat}&longitude=${lng}&night_mode=${nightMode}&profile=walking`
+  );
+  return await response.json();
+};
+
+// Gece modu ile:
+const result = await findNearestPharmacy(40.1828, 29.0665, true);
+console.log('Aydınlatma Analizi:', result.lighting_analysis);
+```
+
+---
+
+#### 3. Haritada Lokasyona Navigasyon (Gece Modu Desteği)
+
+**Endpoint:** `GET /api/v1/locations/navigate/{location_type}/{location_id}`
+
+**Query Parameters:**
+- `latitude` (float, **zorunlu**): Kullanıcı enlemi
+- `longitude` (float, **zorunlu**): Kullanıcı boylamı
+- `profile` (string, default: "driving"): Ulaşım türü (driving, walking, cycling)
+- `night_mode` (bool, default: false): **Gece modu aktifse aydınlık yolları tercih eder**
+
+**Örnek:**
+```
+GET /api/v1/locations/navigate/pharmacy/123?latitude=40.1828&longitude=29.0665&profile=walking&night_mode=true
+```
+
+**Response (Normal Mod):**
+```json
+{
+  "found": true,
+  "night_mode": false,
+  "destination": {
+    "id": 123,
+    "name": "Merkez Eczanesi",
+    "latitude": 40.1830,
+    "longitude": 29.0670,
+    "icon": "💊"
+  },
+  "distance_km": 0.5,
+  "duration_min": 5.0,
+  "geometry": {...},
+  "steps": [...]
+}
+```
+
+**Response (Gece Modu):**
+```json
+{
+  "found": true,
+  "night_mode": true,
+  "destination": {
+    "id": 123,
+    "name": "Merkez Eczanesi",
+    "latitude": 40.1830,
+    "longitude": 29.0670,
+    "icon": "💊"
+  },
+  "route": {
+    "distance_km": 0.7,
+    "duration_min": 6.5,
+    "geometry": {...},
+    "steps": [...]
+  },
+  "lighting_analysis": {
+    "lighting_score": 0.25,
+    "dark_segment_count": 1,
+    "avg_lighting_score": 0.80,
+    "is_night_mode_optimized": true
+  }
+}
+```
+
+**Frontend Kullanım Senaryosu:**
+```javascript
+// 1. Haritada eczaneye tıkla - Normal rota al
+const normalRoute = await fetch(
+  `/api/v1/locations/navigate/pharmacy/${pharmacyId}?latitude=${lat}&longitude=${lng}&profile=walking`
+);
+
+// 2. "Gece Modu" butonuna bas - Aydınlık rota al
+const nightRoute = await fetch(
+  `/api/v1/locations/navigate/pharmacy/${pharmacyId}?latitude=${lat}&longitude=${lng}&profile=walking&night_mode=true`
+);
+
+// 3. Karşılaştır ve göster
+if (nightRoute.lighting_analysis.dark_segment_count < normalRoute.dark_segment_count) {
+  // Gece modu daha iyi, göster
+  displayRoute(nightRoute);
+} else {
+  // Normal rota yeterince aydınlık
+  displayRoute(normalRoute);
+}
+```
+
+---
+
+#### 4. Yakındaki Hastaneler
 
 **Endpoint:** `GET /api/v1/locations/hospitals`
 

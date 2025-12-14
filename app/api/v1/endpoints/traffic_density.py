@@ -24,6 +24,8 @@ async def get_traffic_forecast(
 ):
     """
     Trafik yoğunluğu ve tahmin verilerini getir (Herkes için)
+    
+    Eğer belirtilen saat içinde veri yoksa, en son mevcut verileri döner.
     """
     cutoff_time = datetime.utcnow() - timedelta(hours=hours)
     
@@ -42,6 +44,24 @@ async def get_traffic_forecast(
     result = await db.execute(query)
     forecasts = result.scalars().all()
     
+    # Eğer belirtilen saat içinde veri yoksa, en son verileri al (son 7 gün)
+    if not forecasts:
+        cutoff_time = datetime.utcnow() - timedelta(days=7)
+        query = select(TrafficForecast).where(
+            TrafficForecast.timestamp >= cutoff_time
+        )
+        
+        if segment_id:
+            query = query.where(TrafficForecast.segment_id == segment_id)
+        
+        if signal_id:
+            query = query.where(TrafficForecast.signal_id == signal_id)
+        
+        query = query.order_by(desc(TrafficForecast.timestamp))
+        
+        result = await db.execute(query)
+        forecasts = result.scalars().all()
+    
     return [TrafficForecastResponse.model_validate(f) for f in forecasts]
 
 
@@ -52,8 +72,11 @@ async def get_current_traffic(
 ):
     """
     Şu anki trafik yoğunluğunu getir (Herkes için - 3D harita)
+    
+    En son trafik verilerini getirir. Eğer son 15 dakika içinde veri yoksa,
+    en son mevcut verileri döner.
     """
-    # Son 15 dakika içindeki veriler
+    # Önce son 15 dakika içindeki verileri kontrol et
     cutoff_time = datetime.utcnow() - timedelta(minutes=15)
     
     query = select(TrafficForecast).where(
@@ -63,16 +86,27 @@ async def get_current_traffic(
     if segment_id:
         query = query.where(TrafficForecast.segment_id == segment_id)
     
-    # Her segment için en son veriyi al
-    query = query.order_by(
-        TrafficForecast.segment_id,
-        desc(TrafficForecast.timestamp)
-    )
+    query = query.order_by(desc(TrafficForecast.timestamp))
     
     result = await db.execute(query)
     forecasts = result.scalars().all()
     
-    # Segment bazında grupla ve en son veriyi al
+    # Eğer son 15 dakika içinde veri yoksa, en son verileri al (son 24 saat)
+    if not forecasts:
+        cutoff_time = datetime.utcnow() - timedelta(hours=24)
+        query = select(TrafficForecast).where(
+            TrafficForecast.timestamp >= cutoff_time
+        )
+        
+        if segment_id:
+            query = query.where(TrafficForecast.segment_id == segment_id)
+        
+        query = query.order_by(desc(TrafficForecast.timestamp))
+        
+        result = await db.execute(query)
+        forecasts = result.scalars().all()
+    
+    # Segment/signal bazında grupla ve en son veriyi al
     seen_segments = set()
     unique_forecasts = []
     for forecast in forecasts:
