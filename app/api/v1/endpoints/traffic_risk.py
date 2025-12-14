@@ -166,29 +166,28 @@ async def create_whatif_scenario(
     from app.services.traffic_whatif_service import TrafficWhatIfService
     whatif_service = TrafficWhatIfService()
     
-    # Spatial neighbors oluştur (bir kere, cache'lenebilir)
-    # TODO: Bu kısmı optimize et - neighbors'ı cache'le
-    # whatif_service.build_spatial_neighbors(segments_gdf)
-    
-    # Senaryoyu çalıştır
-    scenario_result = whatif_service.what_if_road_work(
+    # Senaryoyu çalıştır (scenario_type'a göre)
+    scenario_result = whatif_service.run_scenario(
+        scenario_type=request.scenario_type,
         seg_status_df=df,
         segment_id=request.segment_id,
         lane_closed=request.lane_closed,
         duration_hours=request.duration_hours,
         start_time=request.start_time,
-        max_hops=5
+        max_hops=5,
+        event_attendance=request.event_attendance,
+        weather_severity=request.weather_severity
     )
     
     # Veritabanına kaydet
     whatif = WhatIfScenario(
-        scenario_type="road_work",
+        scenario_type=request.scenario_type,
         segment_id=request.segment_id,
         lane_closed=request.lane_closed,
         duration_hours=request.duration_hours,
         start_time=request.start_time,
-        affected_segments=scenario_result["affected_segments"],
-        best_time_window=scenario_result["best_time_window"],
+        affected_segments=json.dumps(scenario_result["affected_segments"]),
+        best_time_window=json.dumps(scenario_result["best_time_window"]),
         summary=scenario_result["summary"],
         created_by=int(current_user["user_id"])
     )
@@ -217,6 +216,15 @@ async def list_whatif_scenarios(
     
     responses = []
     for scenario in scenarios:
+        # JSON alanlarını parse et
+        affected_segs = scenario.affected_segments
+        if isinstance(affected_segs, str):
+            affected_segs = json.loads(affected_segs)
+        
+        best_window = scenario.best_time_window
+        if isinstance(best_window, str):
+            best_window = json.loads(best_window)
+        
         responses.append(WhatIfResponse(
             scenario=scenario.scenario_type,
             segment_id=scenario.segment_id,
@@ -225,8 +233,8 @@ async def list_whatif_scenarios(
                 "duration_hours": scenario.duration_hours
             },
             start_time=scenario.start_time,
-            affected_segments=scenario.affected_segments or [],
-            best_time_window=scenario.best_time_window or {"start": "00:00", "end": "00:00"},
+            affected_segments=affected_segs or [],
+            best_time_window=best_window or {"start": "00:00", "end": "00:00"},
             summary=scenario.summary or ""
         ))
     

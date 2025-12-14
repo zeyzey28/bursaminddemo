@@ -66,10 +66,15 @@ class TrafficForecastResponse(BaseModel):
 
 class WhatIfRequest(BaseModel):
     """What-if senaryo isteği"""
+    scenario_type: str = "road_work"  # road_work, pipe_burst, accident, event, weather
     segment_id: str
-    lane_closed: int = 1
+    lane_closed: int = 1  # road_work, pipe_burst, accident için
     duration_hours: int = 6
     start_time: Optional[str] = None  # "HH:MM" formatı
+    
+    # Senaryo bazlı ek parametreler
+    event_attendance: Optional[int] = None  # event için (katılımcı sayısı)
+    weather_severity: Optional[float] = None  # weather için (0-1 arası şiddet)
 
 
 class AffectedSegment(BaseModel):
