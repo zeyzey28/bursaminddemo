@@ -2,7 +2,7 @@
 Uygulama Konfigürasyonu
 """
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 from pydantic_settings import BaseSettings
 
 
@@ -25,11 +25,14 @@ class Settings(BaseSettings):
     # JWT
     SECRET_KEY: str = "your-super-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30  # 30 dk'ya geri alındı
     
     # AI Service
     AI_SERVICE_URL: str = "https://api.openai.com/v1"
     AI_API_KEY: str = ""
+
+    # Gemini AI (opsiyonel)
+    GEMINI_API_KEY: Optional[str] = None
     
     # File Upload
     UPLOAD_DIR: str = "./uploads"
@@ -61,6 +64,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "allow"  # .env içindeki ekstra alanlar hata vermesin
 
 
 @lru_cache()

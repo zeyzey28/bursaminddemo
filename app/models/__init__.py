@@ -2,10 +2,10 @@
 from app.models.user import User
 from app.models.complaint import Complaint, ComplaintImage, ComplaintFeedback
 from app.models.location import Hospital, Pharmacy, Road, TrafficPoint
-from app.models.trash import TrashBin, TrashCollection, TrashRoute
-from app.models.disaster import DisasterMode, SafeRoute, BlockedRoad
+# Çöp ve afet modelleri devre dışı; import etmiyoruz
 from app.models.air_quality import AirQualityReading
 from app.models.shadow import ShadowRoute
+from app.models.traffic_risk import SegmentRisk, TrafficForecast, WhatIfScenario
 
 __all__ = [
     "User",
@@ -16,13 +16,17 @@ __all__ = [
     "Pharmacy",
     "Road",
     "TrafficPoint",
-    "TrashBin",
-    "TrashCollection",
-    "TrashRoute",
-    "DisasterMode",
-    "SafeRoute",
-    "BlockedRoad",
+    # Çöp ve afet modelleri devre dışı (tutuluyor ama kullanılmıyor)
+    # "TrashBin",
+    # "TrashCollection",
+    # "TrashRoute",
+    # "DisasterMode",
+    # "SafeRoute",
+    # "BlockedRoad",
     "AirQualityReading",
-    "ShadowRoute"
+    "ShadowRoute",
+    "SegmentRisk",
+    "TrafficForecast",
+    "WhatIfScenario"
 ]
 

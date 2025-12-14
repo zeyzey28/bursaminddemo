@@ -19,17 +19,50 @@ from app.schemas.complaint import (
     ComplaintCreate, ComplaintResponse, ComplaintListResponse
 )
 from app.services.storage_service import storage_service
+from app.services.complaint_ai_service import complaint_ai_service
 
 router = APIRouter()
 
 
+# ============================================
+# PUBLIC ENDPOINTS (Authentication gerektirmez)
+# ============================================
+
+@router.get("/categories")
+async def list_categories():
+    """
+    Şikayet kategorilerini listele (Frontend için - Public)
+    """
+    categories = [
+        {"id": "road_damage", "name": "Yol Hasarı", "icon": "🛣️", "color": "#FF6B6B"},
+        {"id": "lighting", "name": "Aydınlatma Sorunu", "icon": "💡", "color": "#FFD93D"},
+        {"id": "traffic", "name": "Trafik Sorunu", "icon": "🚦", "color": "#4D96FF"},
+        {"id": "parking", "name": "Park Sorunu", "icon": "🅿️", "color": "#9D84B7"},
+        {"id": "noise", "name": "Gürültü", "icon": "🔊", "color": "#FF8E53"},
+        {"id": "green_area", "name": "Yeşil Alan", "icon": "🌳", "color": "#4CAF50"},
+        {"id": "water", "name": "Su/Kanalizasyon", "icon": "💧", "color": "#00BCD4"},
+        {"id": "air_quality", "name": "Hava Kalitesi", "icon": "🌫️", "color": "#9E9E9E"},
+        {"id": "safety", "name": "Güvenlik", "icon": "🚨", "color": "#F44336"},
+        {"id": "other", "name": "Diğer", "icon": "📝", "color": "#607D8B"}
+    ]
+    
+    return {
+        "categories": categories,
+        "total": len(categories)
+    }
+
+
+# ============================================
+# AUTHENTICATED ENDPOINTS
+# ============================================
+
 @router.post("/", response_model=ComplaintResponse, status_code=status.HTTP_201_CREATED)
 async def create_complaint(
-    title: str = Form(...),
     description: str = Form(...),
     category: str = Form(...),
     latitude: float = Form(...),
     longitude: float = Form(...),
+    title: Optional[str] = Form(None),
     address: Optional[str] = Form(None),
     images: List[UploadFile] = File(default=[]),
     current_user: dict = Depends(get_current_user),
@@ -37,7 +70,13 @@ async def create_complaint(
 ):
     """
     Yeni şikayet oluştur (fotoğraf ile birlikte)
+    
+    Title opsiyonel - verilmezse description'dan otomatik oluşturulur
     """
+    # Title oluştur (verilmemişse description'dan)
+    if not title:
+        title = description[:50] + "..." if len(description) > 50 else description
+    
     # Kategori kontrolü
     try:
         category_enum = ComplaintCategory(category)
@@ -46,6 +85,32 @@ async def create_complaint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Geçersiz kategori. Geçerli kategoriler: {[c.value for c in ComplaintCategory]}"
         )
+    
+    # AI ile şikayeti sınıflandır ve skorla (async)
+    ai_result = await complaint_ai_service.classify_complaint(
+        title=title,
+        description=description,
+        user_category=category
+    )
+    
+    # AI önerisi varsa kategoriyi güncelle
+    if ai_result["ai_category_suggestion"]:
+        try:
+            suggested_category = ComplaintCategory(ai_result["ai_category_suggestion"])
+            # Eğer AI güven skoru yüksekse, AI'nın önerisini kullan
+            if ai_result["category_confidence"] > 0.7:
+                category_enum = suggested_category
+        except ValueError:
+            pass  # AI önerisi geçersizse kullanıcının seçimini kullan
+    
+    # Priority'yi AI skoruna göre belirle
+    priority_map = {
+        "urgent": ComplaintPriority.URGENT,
+        "high": ComplaintPriority.HIGH,
+        "medium": ComplaintPriority.MEDIUM,
+        "low": ComplaintPriority.LOW
+    }
+    priority = priority_map.get(ai_result["priority"], ComplaintPriority.MEDIUM)
     
     # Şikayet oluştur
     complaint = Complaint(
@@ -57,7 +122,11 @@ async def create_complaint(
         longitude=longitude,
         address=address,
         status=ComplaintStatus.PENDING,
-        priority=ComplaintPriority.MEDIUM
+        priority=priority,
+        urgency_score=ai_result["urgency_score"],
+        ai_verified=ai_result["ai_verified"],
+        ai_verification_score=ai_result["ai_verification_score"],
+        ai_category_suggestion=ai_result["ai_category_suggestion"]
     )
     
     db.add(complaint)
@@ -238,25 +307,4 @@ async def get_complaint_image(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Fotoğraf yerel sunucuda. Supabase Storage kullanın."
         )
-
-
-@router.get("/categories/list")
-async def list_categories():
-    """
-    Şikayet kategorilerini listele
-    """
-    categories = {
-        "road_damage": "Yol Hasarı",
-        "lighting": "Aydınlatma Sorunu",
-        "trash": "Çöp/Temizlik",
-        "traffic": "Trafik Sorunu",
-        "parking": "Park Sorunu",
-        "noise": "Gürültü",
-        "green_area": "Yeşil Alan",
-        "water": "Su/Kanalizasyon",
-        "air_quality": "Hava Kalitesi",
-        "safety": "Güvenlik",
-        "other": "Diğer"
-    }
-    return categories
 

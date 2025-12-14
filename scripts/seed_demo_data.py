@@ -15,9 +15,9 @@ from app.core.security import get_password_hash
 from app.models.user import User, UserRole
 from app.models.complaint import Complaint, ComplaintStatus, ComplaintCategory, ComplaintPriority
 from app.models.location import TrafficPoint, TrafficLevel
-from app.models.trash import TrashBin, TrashBinType
+from app.models.trash import TrashBin, TrashBinType  # noqa: F401 (çöp modülü devre dışı)
 from app.models.air_quality import AirQualityReading, AirQualityLevel
-from app.models.disaster import DisasterMode, SafeRoute, BlockedRoad, DisasterType, DisasterSeverity
+from app.models.disaster import DisasterMode, SafeRoute, BlockedRoad, DisasterType, DisasterSeverity  # noqa: F401 (afet modülü devre dışı)
 from app.models.shadow import ShadowRoute
 
 
@@ -164,30 +164,9 @@ async def create_traffic_points(session):
 
 
 async def create_trash_bins(session):
-    """Çöp kutuları oluştur"""
-    print("\n🗑️ Çöp kutuları oluşturuluyor...")
-    
-    bins = []
-    for i in range(15):
-        lat, lon = random_point_in_bounds()
-        
-        bin = TrashBin(
-            latitude=lat,
-            longitude=lon,
-            bin_type=random.choice(list(TrashBinType)),
-            capacity_liters=random.choice([120, 240, 360]),
-            fill_level=random.uniform(0, 100),
-            has_sensor=random.choice([True, False]),
-            sensor_id=f"SENSOR-{i+1:03d}" if random.choice([True, False]) else None,
-            needs_maintenance=random.choice([True, False, False, False]),
-            last_fill_update=datetime.utcnow() - timedelta(hours=random.randint(0, 24))
-        )
-        session.add(bin)
-        bins.append(bin)
-    
-    await session.flush()
-    print(f"✓ {len(bins)} çöp kutusu oluşturuldu")
-    return bins
+    """Çöp modülü devre dışı"""
+    print("\n🗑️ Çöp kutuları atlandı (devre dışı).")
+    return []
 
 
 async def create_air_quality(session):
@@ -268,48 +247,9 @@ async def create_shadow_routes(session):
 
 
 async def create_safe_routes(session):
-    """Güvenli tahliye rotaları oluştur"""
-    print("\n🚨 Güvenli rotalar oluşturuluyor...")
-    
-    import json
-    
-    routes_data = [
-        ("Toplanma Alanı 1 Rotası", "Nilüfer Meydanı"),
-        ("Toplanma Alanı 2 Rotası", "Park Alanı"),
-        ("Hastane Yolu", "Devlet Hastanesi"),
-    ]
-    
-    routes = []
-    for name, end_name in routes_data:
-        start_lat, start_lon = random_point_in_bounds()
-        end_lat, end_lon = random_point_in_bounds()
-        
-        coords = json.dumps([
-            [start_lon, start_lat],
-            [end_lon, end_lat]
-        ])
-        
-        route = SafeRoute(
-            name=name,
-            description=f"{name} - Güvenli tahliye rotası",
-            coordinates=coords,
-            start_name="Başlangıç Noktası",
-            start_latitude=start_lat,
-            start_longitude=start_lon,
-            end_name=end_name,
-            end_latitude=end_lat,
-            end_longitude=end_lon,
-            distance_km=random.uniform(0.3, 1.5),
-            estimated_walk_time_min=random.randint(3, 15),
-            capacity_people=random.randint(100, 500),
-            is_accessible=True
-        )
-        session.add(route)
-        routes.append(route)
-    
-    await session.flush()
-    print(f"✓ {len(routes)} güvenli rota oluşturuldu")
-    return routes
+    """Afet/güvenli rota devre dışı"""
+    print("\n🚨 Güvenli rotalar atlandı (devre dışı).")
+    return []
 
 
 async def main():

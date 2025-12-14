@@ -4,10 +4,11 @@ Belediye Paneli Endpoint'leri
 from typing import List, Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
+import json
 
 from app.core.database import get_db
 from app.core.security import get_current_municipality
@@ -18,6 +19,11 @@ from app.schemas.complaint import (
     ComplaintFeedbackCreate, ComplaintFeedbackResponse, ComplaintStats
 )
 from app.services.storage_service import storage_service
+from app.services.feedback_templates import (
+    get_feedback_templates, 
+    get_feedback_template,
+    get_responsible_unit
+)
 
 router = APIRouter()
 
@@ -334,6 +340,329 @@ async def get_urgent_complaints(
     return {
         "urgent_complaints": [ComplaintResponse.model_validate(c) for c in complaints],
         "total_urgent": len(complaints)
+    }
+
+
+@router.get("/complaints/export")
+async def export_complaints_json(
+    period: str = Query("daily", description="daily, weekly, monthly, yearly"),
+    status_filter: Optional[str] = Query(None),
+    category_filter: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_municipality),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Şikayetleri JSON formatında dışa aktar (Belediye paneli)
+    """
+    # Tarih aralığı
+    now = datetime.utcnow()
+    if period == "daily":
+        start_date = now - timedelta(days=1)
+    elif period == "weekly":
+        start_date = now - timedelta(weeks=1)
+    elif period == "monthly":
+        start_date = now - timedelta(days=30)
+    else:  # yearly
+        start_date = now - timedelta(days=365)
+    
+    query = select(Complaint).where(Complaint.created_at >= start_date)
+    
+    if status_filter:
+        query = query.where(Complaint.status == status_filter)
+    if category_filter:
+        query = query.where(Complaint.category == category_filter)
+    
+    query = query.options(selectinload(Complaint.images), selectinload(Complaint.feedbacks))
+    result = await db.execute(query)
+    complaints = result.scalars().all()
+    
+    # JSON formatına dönüştür
+    export_data = []
+    for c in complaints:
+        export_data.append({
+            "id": c.id,
+            "title": c.title,
+            "description": c.description,
+            "category": c.category.value,
+            "ai_suggested_category": c.ai_category_suggestion,
+            "urgency_score": c.urgency_score,
+            "priority": c.priority.value,
+            "status": c.status.value,
+            "latitude": c.latitude,
+            "longitude": c.longitude,
+            "address": c.address,
+            "image_count": len(c.images),
+            "feedback_count": len(c.feedbacks),
+            "created_at": c.created_at.isoformat(),
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None
+        })
+    
+    return JSONResponse(
+        content={
+            "period": period,
+            "start_date": start_date.isoformat(),
+            "end_date": now.isoformat(),
+            "total_complaints": len(export_data),
+            "complaints": export_data
+        },
+        headers={
+            "Content-Disposition": f"attachment; filename=complaints_{period}_{now.strftime('%Y%m%d')}.json"
+        }
+    )
+
+
+@router.get("/complaints/geojson")
+async def get_complaints_geojson(
+    status_filter: Optional[str] = Query(None),
+    priority_filter: Optional[str] = Query(None),
+    days: int = Query(30, ge=1, le=365),
+    current_user: dict = Depends(get_current_municipality),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Şikayetleri GeoJSON formatında getir (Belediye paneli - 3D harita için)
+    """
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    
+    query = select(Complaint).where(Complaint.created_at >= cutoff)
+    
+    if status_filter:
+        query = query.where(Complaint.status == status_filter)
+    if priority_filter:
+        query = query.where(Complaint.priority == priority_filter)
+    
+    query = query.options(selectinload(Complaint.images))
+    result = await db.execute(query)
+    complaints = result.scalars().all()
+    
+    features = []
+    for c in complaints:
+        # Pin rengi priority'ye göre
+        if c.priority == ComplaintPriority.URGENT:
+            color = "#FF0000"  # Kırmızı
+            emoji = "🚨"
+        elif c.priority == ComplaintPriority.HIGH:
+            color = "#FFA500"  # Turuncu
+            emoji = "⚠️"
+        elif c.priority == ComplaintPriority.MEDIUM:
+            color = "#FFFF00"  # Sarı
+            emoji = "⚡"
+        else:
+            color = "#90EE90"  # Açık yeşil
+            emoji = "📍"
+        
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [c.longitude, c.latitude]
+            },
+            "properties": {
+                "id": c.id,
+                "title": c.title,
+                "category": c.category.value,
+                "status": c.status.value,
+                "priority": c.priority.value,
+                "urgency_score": c.urgency_score,
+                "color": color,
+                "emoji": emoji,
+                "image_count": len(c.images),
+                "created_at": c.created_at.isoformat(),
+                "type": "complaint"
+            }
+        })
+    
+    return {"type": "FeatureCollection", "features": features}
+
+
+# ============================================
+# FEEDBACK ŞABLONLERİ
+# ============================================
+
+@router.get("/feedback/templates")
+async def list_feedback_templates(
+    current_user: dict = Depends(get_current_municipality)
+):
+    """
+    Hazır feedback şablonlarını listele
+    """
+    return {
+        "templates": get_feedback_templates(),
+        "total": len(get_feedback_templates())
+    }
+
+
+@router.post("/complaints/{complaint_id}/feedback/template/{template_id}")
+async def add_feedback_from_template(
+    complaint_id: int,
+    template_id: str,
+    custom_message: Optional[str] = None,
+    current_user: dict = Depends(get_current_municipality),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Hazır şablondan feedback ekle
+    """
+    # Şikayeti kontrol et
+    result = await db.execute(
+        select(Complaint).where(Complaint.id == complaint_id)
+    )
+    complaint = result.scalar_one_or_none()
+    
+    if not complaint:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Şikayet bulunamadı"
+        )
+    
+    # Şablonu al
+    template = get_feedback_template(template_id)
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Şablon bulunamadı"
+        )
+    
+    # Geri bildirim oluştur
+    feedback = ComplaintFeedback(
+        complaint_id=complaint_id,
+        municipality_user_id=int(current_user["user_id"]),
+        message=custom_message or template["message"],
+        new_status=template["new_status"]
+    )
+    
+    db.add(feedback)
+    
+    # Durumu güncelle
+    complaint.status = template["new_status"]
+    if template["new_status"] == "resolved":
+        complaint.resolved_at = datetime.utcnow()
+    
+    await db.flush()
+    await db.refresh(feedback)
+    
+    return {
+        "feedback": ComplaintFeedbackResponse.model_validate(feedback),
+        "template_used": template["title"]
+    }
+
+
+# ============================================
+# İLGİLİ BİRİM BİLGİSİ
+# ============================================
+
+@router.get("/complaints/{complaint_id}/responsible-unit")
+async def get_complaint_responsible_unit(
+    complaint_id: int,
+    current_user: dict = Depends(get_current_municipality),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Şikayet için ilgili birimi döner
+    """
+    result = await db.execute(
+        select(Complaint).where(Complaint.id == complaint_id)
+    )
+    complaint = result.scalar_one_or_none()
+    
+    if not complaint:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Şikayet bulunamadı"
+        )
+    
+    # AI öneri varsa önce onu kullan
+    category = complaint.ai_category_suggestion or complaint.category.value
+    
+    return {
+        "complaint_id": complaint_id,
+        "category": complaint.category.value,
+        "ai_suggested_category": complaint.ai_category_suggestion,
+        "responsible_unit": get_responsible_unit(category)
+    }
+
+
+# ============================================
+# RAPORLAR
+# ============================================
+
+@router.get("/reports/daily")
+async def get_daily_report(
+    date: Optional[datetime] = Query(None),
+    current_user: dict = Depends(get_current_municipality),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Günlük rapor - Tüm istatistikler
+    """
+    target_date = date or datetime.utcnow()
+    start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_day = start_of_day + timedelta(days=1)
+    
+    # Toplam şikayetler
+    total_result = await db.execute(
+        select(func.count(Complaint.id)).where(
+            and_(
+                Complaint.created_at >= start_of_day,
+                Complaint.created_at < end_of_day
+            )
+        )
+    )
+    total_complaints = total_result.scalar()
+    
+    # Durum bazlı
+    status_query = await db.execute(
+        select(
+            Complaint.status,
+            func.count(Complaint.id)
+        ).where(
+            and_(
+                Complaint.created_at >= start_of_day,
+                Complaint.created_at < end_of_day
+            )
+        ).group_by(Complaint.status)
+    )
+    status_breakdown = {row[0].value: row[1] for row in status_query}
+    
+    # Kategori bazlı
+    category_query = await db.execute(
+        select(
+            Complaint.category,
+            func.count(Complaint.id)
+        ).where(
+            and_(
+                Complaint.created_at >= start_of_day,
+                Complaint.created_at < end_of_day
+            )
+        ).group_by(Complaint.category)
+    )
+    category_breakdown = {row[0].value: row[1] for row in category_query}
+    
+    # Çözülme oranı
+    resolved_result = await db.execute(
+        select(func.count(Complaint.id)).where(
+            and_(
+                Complaint.resolved_at >= start_of_day,
+                Complaint.resolved_at < end_of_day
+            )
+        )
+    )
+    resolved_count = resolved_result.scalar()
+    
+    return {
+        "report_type": "daily",
+        "date": start_of_day.isoformat(),
+        "summary": {
+            "total_complaints": total_complaints,
+            "resolved_complaints": resolved_count,
+            "resolution_rate": round(resolved_count / total_complaints * 100, 2) if total_complaints > 0 else 0,
+            "pending_complaints": status_breakdown.get("pending", 0)
+        },
+        "breakdown": {
+            "by_status": status_breakdown,
+            "by_category": category_breakdown
+        }
     }
 
 

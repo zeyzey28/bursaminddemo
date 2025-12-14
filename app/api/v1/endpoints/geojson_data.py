@@ -12,7 +12,6 @@ from sqlalchemy import select
 from geopy.distance import geodesic
 
 from app.core.database import get_db
-from app.models.disaster import AssemblyPoint
 from app.models.location import Pharmacy
 
 router = APIRouter()
@@ -119,106 +118,6 @@ async def get_pharmacies_list():
 
 
 # ============================================
-# TOPLANMA ALANLARI
-# ============================================
-
-@router.get("/assembly-points/in-buffer")
-async def get_assembly_points_in_buffer():
-    """
-    Buffer alanı içindeki afet toplanma alanları (GeoJSON)
-    """
-    return load_geojson("toplanma_alanı_in_buffer_centroid.geojson")
-
-
-@router.get("/assembly-points/all")
-async def get_all_assembly_points():
-    """
-    Tüm afet toplanma alanları (GeoJSON)
-    """
-    try:
-        return load_geojson("toplanma_alanı_centroid.geojson")
-    except:
-        return load_geojson("toplanma_alanı_in_buffer_centroid.geojson")
-
-
-@router.get("/assembly-points/list")
-async def get_assembly_points_list():
-    """
-    Buffer alanı içindeki toplanma alanları (Liste formatında)
-    """
-    data = load_geojson("toplanma_alanı_in_buffer_centroid.geojson")
-    
-    points = []
-    for feature in data.get("features", []):
-        props = feature.get("properties", {})
-        coords = feature.get("geometry", {}).get("coordinates", [])
-        
-        points.append({
-            "id": props.get("id"),
-            "name": props.get("ad"),
-            "city": props.get("il"),
-            "district": props.get("ilce"),
-            "neighborhood": props.get("mahalle"),
-            "latitude": float(props.get("lat") or coords[1]) if coords else None,
-            "longitude": float(props.get("lon") or coords[0]) if coords else None
-        })
-    
-    return {
-        "total": len(points),
-        "assembly_points": points
-    }
-
-
-@router.get("/assembly-points/nearest")
-async def find_nearest_assembly_point(
-    latitude: float = Query(..., description="Kullanıcı enlemi"),
-    longitude: float = Query(..., description="Kullanıcı boylamı"),
-    limit: int = Query(5, ge=1, le=20)
-):
-    """
-    En yakın toplanma alanlarını bul
-    """
-    data = load_geojson("toplanma_alanı_in_buffer_centroid.geojson")
-    
-    points = []
-    for feature in data.get("features", []):
-        props = feature.get("properties", {})
-        coords = feature.get("geometry", {}).get("coordinates", [])
-        
-        if not coords or len(coords) < 2:
-            continue
-        
-        point_lat = float(props.get("lat") or coords[1])
-        point_lon = float(props.get("lon") or coords[0])
-        
-        distance = geodesic(
-            (latitude, longitude),
-            (point_lat, point_lon)
-        ).kilometers
-        
-        points.append({
-            "id": props.get("id"),
-            "name": props.get("ad"),
-            "district": props.get("ilce"),
-            "neighborhood": props.get("mahalle"),
-            "latitude": point_lat,
-            "longitude": point_lon,
-            "distance_km": round(distance, 2)
-        })
-    
-    # Mesafeye göre sırala
-    points.sort(key=lambda x: x["distance_km"])
-    
-    return {
-        "user_location": {
-            "latitude": latitude,
-            "longitude": longitude
-        },
-        "nearest_points": points[:limit]
-    }
-
-
-# ============================================
 # TÜM VERİLER (ÖZET)
 # ============================================
 
@@ -232,7 +131,7 @@ async def get_data_summary():
         "datasets": []
     }
     
-    # Dosyaları kontrol et
+    # Dosyaları kontrol et (toplanma alanları kaldırıldı)
     files = [
         ("bulvar_buffer_1km4326.geojson", "1km Buffer Alanı", "polygon"),
         ("bulvar_buffer_1_5_4326.geojson", "1.5km Buffer Alanı", "polygon"),
@@ -240,7 +139,6 @@ async def get_data_summary():
         ("highway_in_1_buffer.geojson", "1km Buffer Yolları", "linestring"),
         ("highway_in_1_5_buffer.geojson", "1.5km Buffer Yolları", "linestring"),
         ("eczane_in_buffer.geojson", "Eczaneler", "point"),
-        ("toplanma_alanı_in_buffer_centroid.geojson", "Toplanma Alanları", "point"),
     ]
     
     for filename, name, geom_type in files:
@@ -285,12 +183,11 @@ async def load_geojson_to_database(
     """
     GeoJSON verilerini veritabanına yükle
     
-    Bu endpoint eczane ve toplanma alanı verilerini
+    Bu endpoint eczane verilerini
     GeoJSON dosyalarından okuyarak veritabanına ekler.
     """
     results = {
-        "pharmacies": {"loaded": 0, "skipped": 0, "errors": []},
-        "assembly_points": {"loaded": 0, "skipped": 0, "errors": []}
+        "pharmacies": {"loaded": 0, "skipped": 0, "errors": []}
     }
     
     # Eczaneleri yükle
@@ -328,43 +225,6 @@ async def load_geojson_to_database(
         await db.commit()
     except Exception as e:
         results["pharmacies"]["errors"].append(str(e))
-    
-    # Toplanma alanlarını yükle
-    try:
-        assembly_data = load_geojson("toplanma_alanı_in_buffer_centroid.geojson")
-        for feature in assembly_data.get("features", []):
-            props = feature.get("properties", {})
-            coords = feature.get("geometry", {}).get("coordinates", [])
-            
-            if not coords or len(coords) < 2:
-                continue
-            
-            name = props.get("ad")
-            osm_id = str(props.get("id"))
-            
-            # Zaten var mı kontrol et
-            existing = await db.execute(
-                select(AssemblyPoint).where(AssemblyPoint.osm_id == osm_id)
-            )
-            if existing.scalar_one_or_none():
-                results["assembly_points"]["skipped"] += 1
-                continue
-            
-            point = AssemblyPoint(
-                name=name,
-                osm_id=osm_id,
-                latitude=float(props.get("lat") or coords[1]),
-                longitude=float(props.get("lon") or coords[0]),
-                district=props.get("ilce"),
-                neighborhood=props.get("mahalle"),
-                is_active=True
-            )
-            db.add(point)
-            results["assembly_points"]["loaded"] += 1
-        
-        await db.commit()
-    except Exception as e:
-        results["assembly_points"]["errors"].append(str(e))
     
     return {
         "success": True,

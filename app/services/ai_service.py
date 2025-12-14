@@ -18,7 +18,6 @@ class AIImageAnalyzer:
     CATEGORY_KEYWORDS = {
         "road_damage": ["çukur", "asfalt", "yol", "kaldırım", "kırık", "hasar", "pothole", "crack"],
         "lighting": ["lamba", "aydınlatma", "karanlık", "ışık", "direk", "ampul"],
-        "trash": ["çöp", "atık", "kirlilik", "pislik", "çöp kutusu", "garbage", "waste"],
         "traffic": ["trafik", "işaret", "levha", "sinyal", "trafik lambası"],
         "parking": ["park", "araç", "otopark", "yanlış park"],
         "green_area": ["ağaç", "park", "yeşil", "çim", "bitki", "bahçe"],
@@ -226,7 +225,6 @@ class AIImageAnalyzer:
             "road_damage": 0.6,
             "lighting": 0.5,
             "traffic": 0.5,
-            "trash": 0.4,
             "parking": 0.3,
             "green_area": 0.3,
             "noise": 0.3,
